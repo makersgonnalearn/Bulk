@@ -57,6 +57,30 @@ downloaded model, so it will be fetched again on the next use.
 The container sets its internal port and Python worker path automatically.
 Do not set `DEV_SKIP_LOGIN=true` in a production deployment.
 
+## Manage user access
+
+The app does not have a public sign-up form or an in-app user administration
+screen. Add and remove accounts in the Supabase project connected to the app.
+
+### Add a user
+
+1. In the Supabase Dashboard, open **Authentication → Users** and choose
+   **Add user → Invite user**.
+2. Enter the user's email address and send the invitation.
+3. The user opens the invitation link, chooses a password in Vector Batch
+   Studio, and can then sign in with that email and password.
+
+Before sending invitations, open **Authentication → URL Configuration** in
+Supabase. Set the app's public URL as the **Site URL** and add the app URL to
+**Redirect URLs**. For local Docker use, add `http://localhost:8080/**`; for a
+hosted instance, add its public URL, such as `https://your-domain.example/**`.
+Use the actual URL and port where the user will open the app.
+
+### Remove a user
+
+In **Authentication → Users**, select the account and choose **Delete user**.
+That account will no longer be able to sign in to this app.
+
 ## Run from source without Docker
 
 Use Node.js 24, pnpm 10.26.1, Python 3.13, and uv. Create `.env` as described
