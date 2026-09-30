@@ -84,12 +84,6 @@ pnpm --filter @workspace/api-server run start
 Open [http://localhost:8080](http://localhost:8080). The API loads the root
 `.env` file when it starts.
 
-## Replit development
-
-The web and API artifacts already have managed Replit workflows. Use the
-Vector Batch Studio preview for the UI and the API Server workflow for its
-backend; Docker is intended for running the complete app outside Replit.
-
 ## Runtime and data notes
 
 - The background-removal model downloads the first time that feature is used.
