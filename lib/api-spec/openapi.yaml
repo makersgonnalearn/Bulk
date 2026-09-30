@@ -1,0 +1,458 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: Private team API for secure batch image analysis, background removal, and vectorization.
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: vectorizer
+    description: Batch image processing operations
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /config:
+    get:
+      operationId: getPublicConfig
+      tags: [vectorizer]
+      summary: Get browser-safe application configuration
+      responses:
+        "200":
+          description: Public Supabase configuration required for sign-in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicConfig"
+  /vectorizer/jobs:
+    post:
+      operationId: createVectorizerJob
+      tags: [vectorizer]
+      summary: Upload a ZIP or individual PNG/JPEG files for analysis
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/VectorizerJobUpload"
+      responses:
+        "202":
+          description: Batch accepted; analysis is running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VectorizerJobAccepted"
+        "400":
+          description: Unsupported, invalid, or oversized upload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Sign-in required
+  /vectorizer/jobs/{jobId}:
+    get:
+      operationId: getVectorizerJob
+      tags: [vectorizer]
+      summary: Get batch analysis or processing status
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: Current batch state and per-image results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VectorizerJob"
+        "401":
+          description: Sign-in required
+        "404":
+          description: Batch not found or not owned by the signed-in user
+    patch:
+      operationId: updateVectorizerJobItems
+      tags: [vectorizer]
+      summary: Confirm SEO names and SVG selections before processing
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VectorizerJobItemsUpdate"
+      responses:
+        "200":
+          description: Updated batch settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VectorizerJob"
+        "400":
+          description: Invalid item settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Sign-in required
+        "404":
+          description: Batch not found or not owned by the signed-in user
+    delete:
+      operationId: deleteVectorizerJob
+      tags: [vectorizer]
+      summary: Delete a batch and its temporary files
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "204":
+          description: Batch deleted
+        "401":
+          description: Sign-in required
+        "404":
+          description: Batch not found or not owned by the signed-in user
+  /vectorizer/jobs/{jobId}/items/{itemId}/regenerate-name:
+    post:
+      operationId: regenerateVectorizerJobItemName
+      tags: [vectorizer]
+      summary: Generate a fresh SEO filename for a completed single-image conversion
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+        - $ref: "#/components/parameters/ItemId"
+      responses:
+        "200":
+          description: Updated single-image job with a new filename
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VectorizerJob"
+        "400":
+          description: Invalid job or image ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Sign-in required
+        "404":
+          description: Job or image not found
+        "409":
+          description: Job is not a completed SEO-enabled single-image conversion
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "502":
+          description: Filename generation failed; existing outputs are unchanged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /vectorizer/jobs/{jobId}/process:
+    post:
+      operationId: processVectorizerJob
+      tags: [vectorizer]
+      summary: Process reviewed images with a bounded number of parallel workers
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VectorizerProcessInput"
+      responses:
+        "202":
+          description: Image processing started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VectorizerJobAccepted"
+        "401":
+          description: Sign-in required
+        "404":
+          description: Batch not found or not owned by the signed-in user
+        "409":
+          description: Batch is not ready to process
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /vectorizer/jobs/{jobId}/items/{itemId}/png:
+    get:
+      operationId: getVectorizerJobItemPng
+      tags: [vectorizer]
+      summary: Get a completed PNG image output for preview or download
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+        - $ref: "#/components/parameters/ItemId"
+      responses:
+        "200":
+          description: Completed PNG image output
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: Sign-in required
+        "404":
+          description: Batch or image not found or not owned by the signed-in user
+        "409":
+          description: Requested output is not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /vectorizer/jobs/{jobId}/items/{itemId}/svg:
+    get:
+      operationId: getVectorizerJobItemSvg
+      tags: [vectorizer]
+      summary: Get a completed SVG image output for preview or download
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+        - $ref: "#/components/parameters/ItemId"
+      responses:
+        "200":
+          description: Completed SVG image output
+          content:
+            image/svg+xml:
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: Sign-in required
+        "404":
+          description: Batch or image not found or not owned by the signed-in user
+        "409":
+          description: Requested output is not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /vectorizer/jobs/{jobId}/download:
+    get:
+      operationId: downloadVectorizerJob
+      tags: [vectorizer]
+      summary: Download the completed batch as a ZIP archive
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: ZIP containing transparent PNGs and selected SVGs
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: Sign-in required
+        "404":
+          description: Completed batch not found
+        "409":
+          description: Batch processing is not complete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ItemId:
+      name: itemId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+    PublicConfig:
+      type: object
+      properties:
+        supabaseUrl:
+          type: string
+          format: uri
+        supabaseAnonKey:
+          type: string
+        devLoginEmail:
+          type: ["string", "null"]
+          description: Development-only test identity. Always null outside a guarded development environment.
+      required: [supabaseUrl, supabaseAnonKey, devLoginEmail]
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+    VectorizerJobUpload:
+      type: object
+      properties:
+        files:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: string
+            format: binary
+          description: A single ZIP archive or one or more PNG/JPEG images.
+        backgroundRemoval:
+          type: boolean
+          description: Remove the background; when false, export a PNG with its background intact.
+        seoNaming:
+          type: boolean
+          description: Suggest subject-specific filenames using image analysis.
+        svgOutput:
+          type: boolean
+          description: Allow selected images to also be traced to SVG.
+        preserveFolderStructure:
+          type: boolean
+          description: Preserve image paths from the input ZIP in the output ZIP.
+      required: [files, backgroundRemoval, seoNaming, svgOutput, preserveFolderStructure]
+    VectorizerJobOptions:
+      type: object
+      properties:
+        backgroundRemoval:
+          type: boolean
+        seoNaming:
+          type: boolean
+        svgOutput:
+          type: boolean
+        preserveFolderStructure:
+          type: boolean
+      required: [backgroundRemoval, seoNaming, svgOutput, preserveFolderStructure]
+    VectorizerJobAccepted:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [analyzing, processing]
+      required: [id, status]
+    VectorizerJobItemsUpdate:
+      type: object
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/VectorizerJobItemUpdate"
+      required: [items]
+    VectorizerProcessInput:
+      type: object
+      properties:
+        concurrency:
+          type: integer
+          minimum: 1
+          maximum: 8
+          description: Maximum number of images processed at once.
+      required: [concurrency]
+    VectorizerJobItemUpdate:
+      type: object
+      properties:
+        id:
+          type: string
+        suggestedName:
+          type: string
+          minLength: 1
+          maxLength: 100
+        includeSvg:
+          type: boolean
+      required: [id, suggestedName, includeSvg]
+    VectorizerJobItem:
+      type: object
+      properties:
+        id:
+          type: string
+        originalName:
+          type: string
+        originalPath:
+          type: string
+        suggestedName:
+          type: string
+        includeSvg:
+          type: boolean
+        status:
+          type: string
+          enum: [analyzing, ready, removing-background, converting-png, vectorizing, completed, png-only, failed]
+        error:
+          type: ["string", "null"]
+        pngReady:
+          type: boolean
+        svgReady:
+          type: boolean
+      required: [id, originalName, originalPath, suggestedName, includeSvg, status, error, pngReady, svgReady]
+    VectorizerJob:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [analyzing, ready, processing, completed, failed]
+        totalFiles:
+          type: integer
+        completedFiles:
+          type: integer
+        options:
+          $ref: "#/components/schemas/VectorizerJobOptions"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/VectorizerJobItem"
+        error:
+          type: ["string", "null"]
+      required: [id, status, totalFiles, completedFiles, options, items, error]
+

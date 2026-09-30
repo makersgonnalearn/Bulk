@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Vector Batch Studio"
+description = "A private team workspace for uploading batches of PNG artwork, removing backgrounds, vectorizing suitable images into SVG with compound paths, and downloading SEO-named outputs together."
+version = "1.0.0"
+id = "artifacts/vector-workbench"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 23007
+
+[services.development]
+run = "pnpm --filter @workspace/vector-workbench run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/vector-workbench", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/vector-workbench/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23007"
+BASE_PATH = "/"

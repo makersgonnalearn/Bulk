@@ -1,0 +1,23 @@
+services:
+  vector-batch-studio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: "8080"
+      BASE_PATH: /
+      FRONTEND_DIST_DIR: /app/artifacts/vector-workbench/dist/public
+      PYTHON_EXECUTABLE: /opt/rembg-venv/bin/python
+      U2NET_HOME: /home/node/.u2net
+      DEV_SKIP_LOGIN: "false"
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    volumes:
+      - rembg-model-cache:/home/node/.u2net
+    restart: unless-stopped
+
+volumes:
+  rembg-model-cache:

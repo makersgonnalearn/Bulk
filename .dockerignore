@@ -1,0 +1,16 @@
+.git
+.local
+.cache
+.conversation
+.pythonlibs
+.venv
+node_modules
+**/node_modules
+**/dist
+**/.tsbuildinfo
+__pycache__
+**/__pycache__
+*.py[cod]
+.env
+.env.*
+!.env.example
