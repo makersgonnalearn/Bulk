@@ -27,7 +27,8 @@ import type {
   VectorizerJobAccepted,
   VectorizerJobItemsUpdate,
   VectorizerJobUpload,
-  VectorizerProcessInput
+  VectorizerProcessInput,
+  VectorizerPublishInput
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -695,6 +696,96 @@ export const useProcessVectorizerJob = <TError = ErrorType<void | ApiError>,
         TContext
       > => {
       return useMutation(getProcessVectorizerJobMutationOptions(options));
+    }
+
+export const getPublishVectorizerJobToWebsiteUrl = (jobId: string,) => {
+
+
+
+
+  return `/api/vectorizer/jobs/${jobId}/publish`
+}
+
+/**
+ * Queues the selected items and sends them one at a time. Poll the job for each item's wpStatus. Items already sent or in progress are skipped.
+ * @summary Send finished designs to the MGL website as draft cut files
+ */
+export const publishVectorizerJobToWebsite = async (jobId: string,
+    vectorizerPublishInput: VectorizerPublishInput, options?: Parameters<typeof customFetch>[1]): Promise<VectorizerJob> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<VectorizerJob>(getPublishVectorizerJobToWebsiteUrl(jobId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(vectorizerPublishInput)
+  }
+);}
+
+
+
+
+
+export const getPublishVectorizerJobToWebsiteMutationKey = () => ['publishVectorizerJobToWebsite'] as const;
+
+export const getPublishVectorizerJobToWebsiteMutationOptions = <TError = ErrorType<ApiError | void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof publishVectorizerJobToWebsite>>, TError,PublishVectorizerJobToWebsiteMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof publishVectorizerJobToWebsite>>, TError,PublishVectorizerJobToWebsiteMutationVariables, TContext> => {
+
+const mutationKey = getPublishVectorizerJobToWebsiteMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof publishVectorizerJobToWebsite>>, PublishVectorizerJobToWebsiteMutationVariables> = (props) => {
+          const {jobId,data} = props ?? {};
+
+          return  publishVectorizerJobToWebsite(jobId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PublishVectorizerJobToWebsiteMutationResult = NonNullable<Awaited<ReturnType<typeof publishVectorizerJobToWebsite>>>
+    export type PublishVectorizerJobToWebsiteMutationBody = BodyType<VectorizerPublishInput>
+    export type PublishVectorizerJobToWebsiteMutationError = ErrorType<ApiError | void>
+    export type PublishVectorizerJobToWebsiteMutationVariables = {jobId: string;data: BodyType<VectorizerPublishInput>}
+
+    /**
+ * @summary Send finished designs to the MGL website as draft cut files
+ */
+export const usePublishVectorizerJobToWebsite = <TError = ErrorType<ApiError | void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof publishVectorizerJobToWebsite>>, TError,PublishVectorizerJobToWebsiteMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof publishVectorizerJobToWebsite>>,
+        TError,
+        PublishVectorizerJobToWebsiteMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPublishVectorizerJobToWebsiteMutationOptions(options));
     }
 
 export const getGetVectorizerJobItemPngUrl = (jobId: string,

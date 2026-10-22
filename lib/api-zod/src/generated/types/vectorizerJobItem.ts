@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { VectorizerJobItemStatus } from './vectorizerJobItemStatus';
+import type { VectorizerJobItemWpStatus } from './vectorizerJobItemWpStatus';
 
 export interface VectorizerJobItem {
   id: string;
@@ -18,4 +19,12 @@ export interface VectorizerJobItem {
   error: string | null;
   pngReady: boolean;
   svgReady: boolean;
+  /** Progress of sending this design to the website as a draft. */
+  wpStatus: VectorizerJobItemWpStatus;
+  /** @nullable */
+  wpPostId: number | null;
+  /** @nullable */
+  wpEditUrl: string | null;
+  /** @nullable */
+  wpError: string | null;
 }

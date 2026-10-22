@@ -20,6 +20,8 @@ export type VectorizerItemStatus =
   | "png-only"
   | "failed";
 
+export type WebsiteDraftStatus = "none" | "queued" | "sending" | "sent" | "failed";
+
 export type StoredVectorizerItem = {
   id: string;
   originalName: string;
@@ -34,6 +36,10 @@ export type StoredVectorizerItem = {
   sourcePath: string;
   pngPath: string | null;
   svgPath: string | null;
+  wpStatus: WebsiteDraftStatus;
+  wpPostId: number | null;
+  wpEditUrl: string | null;
+  wpError: string | null;
 };
 
 export type VectorizerProcessingOptions = {
@@ -103,6 +109,10 @@ export async function createStoredVectorizerJob(
         sourcePath,
         pngPath: null,
         svgPath: null,
+        wpStatus: "none",
+        wpPostId: null,
+        wpEditUrl: null,
+        wpError: null,
       });
     }
   } catch (error) {

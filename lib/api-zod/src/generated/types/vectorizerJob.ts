@@ -18,4 +18,6 @@ export interface VectorizerJob {
   items: VectorizerJobItem[];
   /** @nullable */
   error: string | null;
+  /** True when this server can send designs to the website as drafts. */
+  websiteDraftsEnabled: boolean;
 }

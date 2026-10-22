@@ -101,6 +101,20 @@ export const VectorizerJobItemStatus = {
   failed: 'failed',
 } as const;
 
+/**
+ * Progress of sending this design to the website as a draft.
+ */
+export type VectorizerJobItemWpStatus = typeof VectorizerJobItemWpStatus[keyof typeof VectorizerJobItemWpStatus];
+
+
+export const VectorizerJobItemWpStatus = {
+  none: 'none',
+  queued: 'queued',
+  sending: 'sending',
+  sent: 'sent',
+  failed: 'failed',
+} as const;
+
 export interface VectorizerJobItem {
   id: string;
   originalName: string;
@@ -112,6 +126,22 @@ export interface VectorizerJobItem {
   error: string | null;
   pngReady: boolean;
   svgReady: boolean;
+  /** Progress of sending this design to the website as a draft. */
+  wpStatus: VectorizerJobItemWpStatus;
+  /** @nullable */
+  wpPostId: number | null;
+  /** @nullable */
+  wpEditUrl: string | null;
+  /** @nullable */
+  wpError: string | null;
+}
+
+export interface VectorizerPublishInput {
+  /**
+     * @minItems 1
+     * @maxItems 50
+     */
+  itemIds: string[];
 }
 
 export type VectorizerJobStatus = typeof VectorizerJobStatus[keyof typeof VectorizerJobStatus];
@@ -134,5 +164,7 @@ export interface VectorizerJob {
   items: VectorizerJobItem[];
   /** @nullable */
   error: string | null;
+  /** True when this server can send designs to the website as drafts. */
+  websiteDraftsEnabled: boolean;
 }
 

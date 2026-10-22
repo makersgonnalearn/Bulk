@@ -75,9 +75,14 @@ export const GetVectorizerJobResponse = zod.object({
   "status": zod.enum(['analyzing', 'ready', 'removing-background', 'converting-png', 'vectorizing', 'completed', 'png-only', 'failed']),
   "error": zod.string().nullable(),
   "pngReady": zod.boolean(),
-  "svgReady": zod.boolean()
+  "svgReady": zod.boolean(),
+  "wpStatus": zod.enum(['none', 'queued', 'sending', 'sent', 'failed']).describe('Progress of sending this design to the website as a draft.'),
+  "wpPostId": zod.number().int().nullable(),
+  "wpEditUrl": zod.string().nullable(),
+  "wpError": zod.string().nullable()
 })),
-  "error": zod.string().nullable()
+  "error": zod.string().nullable(),
+  "websiteDraftsEnabled": zod.boolean().describe('True when this server can send designs to the website as drafts.')
 })
 
 
@@ -122,9 +127,14 @@ export const UpdateVectorizerJobItemsResponse = zod.object({
   "status": zod.enum(['analyzing', 'ready', 'removing-background', 'converting-png', 'vectorizing', 'completed', 'png-only', 'failed']),
   "error": zod.string().nullable(),
   "pngReady": zod.boolean(),
-  "svgReady": zod.boolean()
+  "svgReady": zod.boolean(),
+  "wpStatus": zod.enum(['none', 'queued', 'sending', 'sent', 'failed']).describe('Progress of sending this design to the website as a draft.'),
+  "wpPostId": zod.number().int().nullable(),
+  "wpEditUrl": zod.string().nullable(),
+  "wpError": zod.string().nullable()
 })),
-  "error": zod.string().nullable()
+  "error": zod.string().nullable(),
+  "websiteDraftsEnabled": zod.boolean().describe('True when this server can send designs to the website as drafts.')
 })
 
 
@@ -166,9 +176,14 @@ export const RegenerateVectorizerJobItemNameResponse = zod.object({
   "status": zod.enum(['analyzing', 'ready', 'removing-background', 'converting-png', 'vectorizing', 'completed', 'png-only', 'failed']),
   "error": zod.string().nullable(),
   "pngReady": zod.boolean(),
-  "svgReady": zod.boolean()
+  "svgReady": zod.boolean(),
+  "wpStatus": zod.enum(['none', 'queued', 'sending', 'sent', 'failed']).describe('Progress of sending this design to the website as a draft.'),
+  "wpPostId": zod.number().int().nullable(),
+  "wpEditUrl": zod.string().nullable(),
+  "wpError": zod.string().nullable()
 })),
-  "error": zod.string().nullable()
+  "error": zod.string().nullable(),
+  "websiteDraftsEnabled": zod.boolean().describe('True when this server can send designs to the website as drafts.')
 })
 
 
@@ -190,6 +205,53 @@ export const ProcessVectorizerJobBody = zod.object({
 export const ProcessVectorizerJobResponse = zod.object({
   "id": zod.string().uuid(),
   "status": zod.enum(['analyzing', 'processing'])
+})
+
+
+/**
+ * Queues the selected items and sends them one at a time. Poll the job for each item's wpStatus. Items already sent or in progress are skipped.
+ * @summary Send finished designs to the MGL website as draft cut files
+ */
+export const PublishVectorizerJobToWebsiteParams = zod.object({
+  "jobId": zod.coerce.string().uuid()
+})
+
+export const publishVectorizerJobToWebsiteBodyItemIdsMax = 50;
+
+
+
+export const PublishVectorizerJobToWebsiteBody = zod.object({
+  "itemIds": zod.array(zod.string()).min(1).max(publishVectorizerJobToWebsiteBodyItemIdsMax)
+})
+
+export const PublishVectorizerJobToWebsiteResponse = zod.object({
+  "id": zod.string().uuid(),
+  "status": zod.enum(['analyzing', 'ready', 'processing', 'completed', 'failed']),
+  "totalFiles": zod.number().int(),
+  "completedFiles": zod.number().int(),
+  "options": zod.object({
+  "backgroundRemoval": zod.boolean(),
+  "seoNaming": zod.boolean(),
+  "svgOutput": zod.boolean(),
+  "preserveFolderStructure": zod.boolean()
+}),
+  "items": zod.array(zod.object({
+  "id": zod.string(),
+  "originalName": zod.string(),
+  "originalPath": zod.string(),
+  "suggestedName": zod.string(),
+  "includeSvg": zod.boolean(),
+  "status": zod.enum(['analyzing', 'ready', 'removing-background', 'converting-png', 'vectorizing', 'completed', 'png-only', 'failed']),
+  "error": zod.string().nullable(),
+  "pngReady": zod.boolean(),
+  "svgReady": zod.boolean(),
+  "wpStatus": zod.enum(['none', 'queued', 'sending', 'sent', 'failed']).describe('Progress of sending this design to the website as a draft.'),
+  "wpPostId": zod.number().int().nullable(),
+  "wpEditUrl": zod.string().nullable(),
+  "wpError": zod.string().nullable()
+})),
+  "error": zod.string().nullable(),
+  "websiteDraftsEnabled": zod.boolean().describe('True when this server can send designs to the website as drafts.')
 })
 
 

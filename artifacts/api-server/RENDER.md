@@ -23,6 +23,8 @@ background-removal model, and serves everything from one origin.
 | `MAX_ACTIVE_ITEMS` | No | Images processed at once across all users. Default `1` |
 | `REMBG_MAX_PARALLEL_REMOVALS` | No | Background removals at once inside the worker. Default `1` |
 | `REMBG_DECONTAMINATE` | No | `true` turns on edge color cleanup. Default off: it adds about 1 GB per image and must stay at one removal at a time |
+| `MGL_WP_URL` | No | MGL WordPress site for **Send to website as drafts**, e.g. `https://makersgonnalearn.com`. The button is hidden unless this and the key are both set |
+| `MGL_WP_IMPORT_KEY` | No | Key from `wp mgl-cutfile-import key create` on that site (the `mgl-cutfile-import` plugin must be active there) |
 
 Render supplies `PORT`. The Dockerfile sets `NODE_ENV`, `PYTHON_EXECUTABLE`,
 and the model path. Never set `DEV_SKIP_LOGIN` or `DEV_LOGIN_EMAIL` here.

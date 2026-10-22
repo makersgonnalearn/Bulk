@@ -22,6 +22,7 @@ import {
   GetVectorizerJobResponse,
   ProcessVectorizerJobBody,
   ProcessVectorizerJobParams,
+  PublishVectorizerJobToWebsiteBody,
   RegenerateVectorizerJobItemNameParams,
   UpdateVectorizerJobItemsBody,
 } from "@workspace/api-zod";
@@ -42,6 +43,12 @@ import {
   removeImageBackground,
   traceTransparentPngToSvg,
 } from "../lib/image-processing";
+import {
+  createWordPressDraft,
+  getWordPressDraftConfig,
+  titleFromSlug,
+  WordPressDraftError,
+} from "../lib/wordpress-drafts";
 import { requireSupabaseUser } from "../middlewares/supabase-auth";
 
 const router: IRouter = Router();
@@ -56,6 +63,7 @@ const maxBatchOutputBytes = 100 * 1024 * 1024;
 const ANALYSIS_CONCURRENCY = 4;
 const maxActiveItems = Math.max(1, Math.floor(Number(process.env.MAX_ACTIVE_ITEMS)) || 1);
 const nameRegenerationLocks = new Set<string>();
+const websitePublishingJobs = new Set<string>();
 
 // One server-wide limit across every user's batches keeps memory predictable.
 let activeItems = 0;
@@ -353,8 +361,13 @@ function toPublicJob(job: StoredVectorizerJob) {
       error: item.error,
       pngReady: item.pngReady,
       svgReady: item.svgReady,
+      wpStatus: item.wpStatus,
+      wpPostId: item.wpPostId,
+      wpEditUrl: item.wpEditUrl,
+      wpError: item.wpError,
     })),
     error: job.error,
+    websiteDraftsEnabled: getWordPressDraftConfig() !== null,
   });
 }
 
@@ -757,6 +770,103 @@ router.post(
     );
   },
 );
+
+// Sends queued items one at a time so the website builds one cut file at a
+// time. A second request for the same batch only queues more items.
+async function publishQueuedItems(job: StoredVectorizerJob): Promise<void> {
+  if (websitePublishingJobs.has(job.id)) return;
+  websitePublishingJobs.add(job.id);
+
+  try {
+    while (!job.cancelled) {
+      const item = job.items.find((candidate) => candidate.wpStatus === "queued");
+      if (!item) return;
+
+      const config = getWordPressDraftConfig();
+      if (!config || !item.pngReady || !item.pngPath) {
+        item.wpStatus = "failed";
+        item.wpError = config ? "This design has no finished PNG." : "Website drafts are not configured on this server.";
+        continue;
+      }
+
+      item.wpStatus = "sending";
+      item.wpError = null;
+      job.lastAccessedAt = Date.now();
+      const svgPath = item.includeSvg && item.svgReady ? item.svgPath : null;
+      try {
+        const draft = await createWordPressDraft(config, {
+          title: titleFromSlug(item.suggestedName),
+          ref: `${job.id}:${item.id}`,
+          pngPath: item.pngPath,
+          pngName: `${item.suggestedName}.png`,
+          svgPath,
+          svgName: `${item.suggestedName}.svg`,
+        });
+        item.wpStatus = "sent";
+        item.wpPostId = draft.postId;
+        item.wpEditUrl = draft.editUrl;
+      } catch (error) {
+        item.wpStatus = "failed";
+        item.wpError = error instanceof WordPressDraftError
+          ? error.message
+          : "This design could not be sent to the website. Try again.";
+        logger.warn({ err: error, jobId: job.id, itemId: item.id }, "Website draft failed");
+      }
+      job.lastAccessedAt = Date.now();
+    }
+  } finally {
+    websitePublishingJobs.delete(job.id);
+  }
+}
+
+router.post("/vectorizer/jobs/:jobId/publish", (req, res): void => {
+  const id = batchId(req);
+  if (!id) {
+    res.status(400).json({ error: "Invalid batch ID." });
+    return;
+  }
+
+  if (!getWordPressDraftConfig()) {
+    res.status(503).json({ error: "Website drafts are not configured on this server." });
+    return;
+  }
+
+  const body = PublishVectorizerJobToWebsiteBody.safeParse(req.body);
+  if (!body.success) {
+    res.status(400).json({ error: "Choose at least one design to send." });
+    return;
+  }
+
+  const job = getOwnedVectorizerJob(id, currentUserId(req));
+  if (!job) {
+    res.status(404).json({ error: "Batch not found." });
+    return;
+  }
+  if (job.status !== "completed") {
+    res.status(409).json({ error: "Wait until processing is complete before sending designs." });
+    return;
+  }
+
+  const requested = new Set(body.data.itemIds);
+  const selected = job.items.filter((item) => requested.has(item.id));
+  if (selected.length !== requested.size) {
+    res.status(400).json({ error: "One or more selected designs are not in this batch." });
+    return;
+  }
+  if (selected.some((item) => !item.pngReady)) {
+    res.status(400).json({ error: "Only designs with a finished PNG can be sent." });
+    return;
+  }
+
+  for (const item of selected) {
+    if (item.wpStatus === "none" || item.wpStatus === "failed") {
+      item.wpStatus = "queued";
+      item.wpError = null;
+    }
+  }
+  void publishQueuedItems(job);
+  res.status(202).json(toPublicJob(job));
+});
 
 router.delete("/vectorizer/jobs/:jobId", async (req, res): Promise<void> => {
   const id = batchId(req);

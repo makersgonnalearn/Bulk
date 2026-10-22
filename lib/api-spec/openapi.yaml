@@ -203,6 +203,51 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+  /vectorizer/jobs/{jobId}/publish:
+    post:
+      operationId: publishVectorizerJobToWebsite
+      tags: [vectorizer]
+      summary: Send finished designs to the MGL website as draft cut files
+      description: Queues the selected items and sends them one at a time. Poll the job for each item's wpStatus. Items already sent or in progress are skipped.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VectorizerPublishInput"
+      responses:
+        "202":
+          description: Items queued; the job shows per-item progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VectorizerJob"
+        "400":
+          description: Invalid item selection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "401":
+          description: Sign-in required
+        "404":
+          description: Batch not found or not owned by the signed-in user
+        "409":
+          description: Batch is not complete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: Website drafts are not configured on this server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
   /vectorizer/jobs/{jobId}/items/{itemId}/png:
     get:
       operationId: getVectorizerJobItemPng
@@ -432,7 +477,27 @@ components:
           type: boolean
         svgReady:
           type: boolean
-      required: [id, originalName, originalPath, suggestedName, includeSvg, status, error, pngReady, svgReady]
+        wpStatus:
+          type: string
+          enum: [none, queued, sending, sent, failed]
+          description: Progress of sending this design to the website as a draft.
+        wpPostId:
+          type: ["integer", "null"]
+        wpEditUrl:
+          type: ["string", "null"]
+        wpError:
+          type: ["string", "null"]
+      required: [id, originalName, originalPath, suggestedName, includeSvg, status, error, pngReady, svgReady, wpStatus, wpPostId, wpEditUrl, wpError]
+    VectorizerPublishInput:
+      type: object
+      properties:
+        itemIds:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: string
+      required: [itemIds]
     VectorizerJob:
       type: object
       properties:
@@ -454,5 +519,8 @@ components:
             $ref: "#/components/schemas/VectorizerJobItem"
         error:
           type: ["string", "null"]
-      required: [id, status, totalFiles, completedFiles, options, items, error]
+        websiteDraftsEnabled:
+          type: boolean
+          description: True when this server can send designs to the website as drafts.
+      required: [id, status, totalFiles, completedFiles, options, items, error, websiteDraftsEnabled]
 

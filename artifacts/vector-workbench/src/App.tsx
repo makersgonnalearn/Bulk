@@ -10,9 +10,11 @@ import {
   ChevronRight,
   CircleAlert,
   CloudUpload,
+  ExternalLink,
   FileArchive,
   FileImage,
   FileOutput,
+  Globe,
   KeyRound,
   Loader2,
   LogOut,
@@ -20,6 +22,7 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  Send,
   Sparkles,
   Trash2,
   Upload,
@@ -41,6 +44,7 @@ import {
   useGetVectorizerJobItemSvg,
   useGetVectorizerJob,
   useProcessVectorizerJob,
+  usePublishVectorizerJobToWebsite,
   useRegenerateVectorizerJobItemName,
   useUpdateVectorizerJobItems,
   type VectorizerJob,
@@ -526,7 +530,7 @@ function UploadPanel({
             type="checkbox"
             checked={options.backgroundRemoval}
             onChange={(event) => onOptionsChange({ backgroundRemoval: event.target.checked })}
-            className="mt-0.5 size-4 shrink-0 accent-[hsl(var(--primary))]"
+            className="mt-0.5 size-4 shrink-0 accent-primary"
           />
           <span><span className="block text-xs font-bold text-foreground">Remove background</span><span className="mt-1 block text-[10px] leading-4 text-muted-foreground">{options.backgroundRemoval ? 'Export cutout PNGs with transparent backgrounds.' : 'Export PNGs with their original backgrounds intact.'}</span></span>
         </label>
@@ -535,7 +539,7 @@ function UploadPanel({
             type="checkbox"
             checked={options.seoNaming}
             onChange={(event) => onOptionsChange({ seoNaming: event.target.checked })}
-            className="mt-0.5 size-4 shrink-0 accent-[hsl(var(--primary))]"
+            className="mt-0.5 size-4 shrink-0 accent-primary"
           />
           <span><span className="block text-xs font-bold text-foreground">SEO filename suggestions</span><span className="mt-1 block text-[10px] leading-4 text-muted-foreground">{options.seoNaming ? 'Suggest clear, subject-specific filenames.' : 'Use safe, unique versions of original filenames.'}</span></span>
         </label>
@@ -544,7 +548,7 @@ function UploadPanel({
             type="checkbox"
             checked={options.svgOutput}
             onChange={(event) => onOptionsChange({ svgOutput: event.target.checked })}
-            className="mt-0.5 size-4 shrink-0 accent-[hsl(var(--primary))]"
+            className="mt-0.5 size-4 shrink-0 accent-primary"
           />
           <span><span className="block text-xs font-bold text-foreground">SVG output</span><span className="mt-1 block text-[10px] leading-4 text-muted-foreground">{options.svgOutput ? 'Include SVGs when the image analysis finds a good fit.' : 'Skip vector tracing and create PNGs only.'}</span></span>
         </label>
@@ -559,7 +563,7 @@ function UploadPanel({
               data-testid="radio-preserve-folders"
               checked={options.preserveFolderStructure !== false}
               onChange={() => onOptionsChange({ preserveFolderStructure: true })}
-              className="mt-0.5 size-4 shrink-0 accent-[hsl(var(--primary))]"
+              className="mt-0.5 size-4 shrink-0 accent-primary"
             />
             <span><span className="block text-xs font-bold text-foreground">Preserve uploaded folders</span><span className="mt-1 block text-[10px] leading-4 text-muted-foreground">Keep each image’s folder path; PNG and SVG sit together there. Names follow your naming setting.</span></span>
           </label>
@@ -570,7 +574,7 @@ function UploadPanel({
               data-testid="radio-flat-zip"
               checked={options.preserveFolderStructure === false}
               onChange={() => onOptionsChange({ preserveFolderStructure: false })}
-              className="mt-0.5 size-4 shrink-0 accent-[hsl(var(--primary))]"
+              className="mt-0.5 size-4 shrink-0 accent-primary"
             />
             <span><span className="block text-xs font-bold text-foreground">Flat ZIP</span><span className="mt-1 block text-[10px] leading-4 text-muted-foreground">Put all generated files together in the ZIP root.</span></span>
           </label>
@@ -692,16 +696,38 @@ function ProcessingPanel({ job, concurrency, reconnecting }: { job: VectorizerJo
   );
 }
 
-function ResultsPanel({ job, onDownload, downloading, onFresh }: { job: VectorizerJob; onDownload: () => void; downloading: boolean; onFresh: () => void }) {
+function canSendToWebsite(item: VectorizerJobItem): boolean {
+  return item.pngReady && (item.wpStatus === 'none' || item.wpStatus === 'failed');
+}
+
+function WebsiteDraftStatus({ item }: { item: VectorizerJobItem }) {
+  if (item.wpStatus === 'queued' || item.wpStatus === 'sending') return <span data-testid={`status-website-${item.id}`} className="inline-flex items-center gap-1.5 rounded-full bg-accent/20 px-2.5 py-1 text-[10px] font-bold text-accent-foreground"><Loader2 size={11} className="animate-spin" />{item.wpStatus === 'queued' ? 'Queued' : 'Sending'}</span>;
+  if (item.wpStatus === 'sent' && item.wpEditUrl) return <a data-testid={`link-website-draft-${item.id}`} href={item.wpEditUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary transition hover:bg-primary/20">Draft created · Open in WordPress <ExternalLink size={11} /></a>;
+  if (item.wpStatus === 'failed') return <span data-testid={`status-website-${item.id}`} className="inline-flex items-center gap-1.5 rounded-full bg-destructive/10 px-2.5 py-1 text-[10px] font-bold text-destructive"><CircleAlert size={11} />Not sent</span>;
+  return null;
+}
+
+function ResultsPanel({ job, onDownload, downloading, onFresh, onSendToWebsite, sendingToWebsite }: { job: VectorizerJob; onDownload: () => void; downloading: boolean; onFresh: () => void; onSendToWebsite: (itemIds: string[]) => void; sendingToWebsite: boolean }) {
   const completed = job.items.filter((item) => item.status === 'completed' || item.status === 'png-only');
   const failed = job.items.filter((item) => item.status === 'failed');
+  const websiteEnabled = job.websiteDraftsEnabled && job.status === 'completed';
+  const [websiteSelection, setWebsiteSelection] = useState<Set<string>>(() => new Set(job.items.filter((item) => item.pngReady && item.wpStatus === 'none').map((item) => item.id)));
+  const selectedForWebsite = job.items.filter((item) => canSendToWebsite(item) && websiteSelection.has(item.id));
+  const sentCount = job.items.filter((item) => item.wpStatus === 'sent').length;
+  const websiteBusy = sendingToWebsite || job.items.some((item) => item.wpStatus === 'queued' || item.wpStatus === 'sending');
+  const toggleWebsiteItem = (id: string) => setWebsiteSelection((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   return (
     <div className="animate-rise-in">
       <div className="mb-8 flex flex-col justify-between gap-5 sm:flex-row sm:items-end"><div><p className="mono mb-3 text-[10px] uppercase tracking-[.22em] text-primary">05 / delivery ready</p><h1 className="text-4xl font-extrabold tracking-[-.07em]">The set is<br /><span className="text-primary">ready to move.</span></h1><p className="mt-4 text-sm text-muted-foreground">{completed.length} assets prepared{failed.length ? ` · ${failed.length} need attention` : ''}.</p></div><div className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary"><CheckCircle2 size={30} strokeWidth={1.6} /></div></div>
       <div className="rounded-2xl border border-card-border bg-card shadow-sm">
         <div className="flex flex-col justify-between gap-4 border-b border-border p-5 sm:flex-row sm:items-center sm:px-6"><div className="flex items-center gap-3"><div className="flex size-10 items-center justify-center rounded-xl bg-secondary text-primary"><FileArchive size={19} /></div><div><p className="text-sm font-extrabold">vector-batch-assets.zip</p><p className="mono mt-1 text-[10px] text-muted-foreground">{completed.length} assets · {job.options.backgroundRemoval ? 'transparent PNG' : 'PNG with background intact'}{job.options.svgOutput ? ' + selected SVG' : ''}</p></div></div><button data-testid="button-download-zip" onClick={onDownload} disabled={downloading || completed.length === 0} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-xs font-extrabold text-primary-foreground transition hover:opacity-90 disabled:opacity-60">{downloading ? <Loader2 size={15} className="animate-spin" /> : <ArrowDownToLine size={15} />}{downloading ? 'Preparing ZIP…' : 'Download ZIP'}</button></div>
+        {websiteEnabled && <div className="flex flex-col justify-between gap-4 border-b border-border bg-muted/40 p-5 sm:flex-row sm:items-center sm:px-6"><div className="flex items-center gap-3"><div className="flex size-10 items-center justify-center rounded-xl bg-secondary text-primary"><Globe size={19} /></div><div><p className="text-sm font-extrabold">MGL website</p><p className="mono mt-1 text-[10px] text-muted-foreground">Drafts only · the team adds details and publishes{sentCount ? ` · ${sentCount} sent` : ''}</p></div></div><button data-testid="button-send-to-website" onClick={() => onSendToWebsite(selectedForWebsite.map((item) => item.id))} disabled={sendingToWebsite || selectedForWebsite.length === 0} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-primary px-4 text-xs font-extrabold text-primary transition hover:bg-primary/10 disabled:opacity-60">{websiteBusy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}Send {selectedForWebsite.length || ''} to website as drafts</button></div>}
         <div className="max-h-[32rem] divide-y divide-border overflow-y-auto">
-          {job.items.map((item) => <div key={item.id} data-testid={`result-row-${item.id}`} className="flex flex-col gap-2 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-6"><div className="flex min-w-0 items-center gap-3"><span className={`flex size-7 shrink-0 items-center justify-center rounded-md ${item.status === 'failed' ? 'bg-destructive/10 text-destructive' : 'bg-primary/10 text-primary'}`}>{item.status === 'failed' ? <CircleAlert size={14} /> : <Check size={14} />}</span><div className="min-w-0"><p className="truncate text-[10px] text-muted-foreground">{item.originalPath || item.originalName}</p><p className="truncate text-xs font-bold">{item.suggestedName}{item.pngReady ? '.png' : ''}{item.svgReady && item.includeSvg ? ' + .svg' : ''}</p>{item.error && <p className="mt-1 truncate text-[10px] text-destructive">{item.error}</p>}</div></div><div className="flex items-center gap-2 pl-10 sm:pl-0">{item.status === 'failed' ? <StatusPill status="failed" /> : <>{item.pngReady && <span className="rounded bg-secondary px-2 py-1 mono text-[9px] text-secondary-foreground">PNG</span>}{item.svgReady && item.includeSvg && <span className="rounded bg-accent/20 px-2 py-1 mono text-[9px] text-accent-foreground">SVG</span>}</>}</div></div>)}
+          {job.items.map((item) => <div key={item.id} data-testid={`result-row-${item.id}`} className="flex flex-col gap-2 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-6"><div className="flex min-w-0 items-center gap-3">{websiteEnabled && <input type="checkbox" data-testid={`checkbox-website-${item.id}`} aria-label={`Send ${item.suggestedName} to the website`} checked={canSendToWebsite(item) && websiteSelection.has(item.id)} disabled={!canSendToWebsite(item) || sendingToWebsite} onChange={() => toggleWebsiteItem(item.id)} className="size-4 shrink-0 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-40" />}<span className={`flex size-7 shrink-0 items-center justify-center rounded-md ${item.status === 'failed' ? 'bg-destructive/10 text-destructive' : 'bg-primary/10 text-primary'}`}>{item.status === 'failed' ? <CircleAlert size={14} /> : <Check size={14} />}</span><div className="min-w-0"><p className="truncate text-[10px] text-muted-foreground">{item.originalPath || item.originalName}</p><p className="truncate text-xs font-bold">{item.suggestedName}{item.pngReady ? '.png' : ''}{item.svgReady && item.includeSvg ? ' + .svg' : ''}</p>{item.error && <p className="mt-1 truncate text-[10px] text-destructive">{item.error}</p>}{item.wpStatus === 'failed' && item.wpError && <p data-testid={`text-website-error-${item.id}`} className="mt-1 text-[10px] text-destructive">{item.wpError}</p>}</div></div><div className="flex flex-wrap items-center gap-2 pl-10 sm:justify-end sm:pl-0">{item.status === 'failed' ? <StatusPill status="failed" /> : <>{item.pngReady && <span className="rounded bg-secondary px-2 py-1 mono text-[9px] text-secondary-foreground">PNG</span>}{item.svgReady && item.includeSvg && <span className="rounded bg-accent/20 px-2 py-1 mono text-[9px] text-accent-foreground">SVG</span>}<WebsiteDraftStatus item={item} /></>}</div></div>)}
         </div>
       </div>
       {failed.length > 0 && <div className="mt-4 rounded-xl border border-destructive/20 bg-destructive/5 p-4 text-xs text-destructive"><p className="font-bold">Some files could not be completed</p><p className="mt-1 opacity-80">Review the error details above and try a fresh batch if needed.</p></div>}
@@ -740,7 +766,8 @@ function Workspace({ user, client, onSignOut }: { user: WorkspaceUser; client: S
   const processJob = useProcessVectorizerJob();
   const deleteJob = useDeleteVectorizerJob();
   const regenerateQuickName = useRegenerateVectorizerJobItemName();
-  const jobQuery = useGetVectorizerJob(jobId || '', { query: { enabled: Boolean(jobId), queryKey: getGetVectorizerJobQueryKey(jobId || ''), retry: (failureCount, error) => !isMissingBatch(error) && failureCount < 3, refetchInterval: (query) => { if (isMissingBatch(query.state.error)) return false; const state = query.state.data?.status; if (query.state.error) return 5000; return !state || state === 'analyzing' || state === 'processing' ? 1800 : false; }, refetchIntervalInBackground: true, refetchOnMount: 'always' } });
+  const publishToWebsite = usePublishVectorizerJobToWebsite();
+  const jobQuery = useGetVectorizerJob(jobId || '', { query: { enabled: Boolean(jobId), queryKey: getGetVectorizerJobQueryKey(jobId || ''), retry: (failureCount, error) => !isMissingBatch(error) && failureCount < 3, refetchInterval: (query) => { if (isMissingBatch(query.state.error)) return false; const state = query.state.data?.status; if (query.state.error) return 5000; const sendingToWebsite = query.state.data?.items.some((item) => item.wpStatus === 'queued' || item.wpStatus === 'sending'); return !state || state === 'analyzing' || state === 'processing' || sendingToWebsite ? 1800 : false; }, refetchIntervalInBackground: true, refetchOnMount: 'always' } });
   const downloadQuery = useDownloadVectorizerJob(jobId || '', { request: { responseType: 'blob' }, query: { enabled: false, queryKey: getDownloadVectorizerJobQueryKey(jobId || '') } });
   const job = jobQuery.data;
   const quickItem = workflowMode === 'quick' ? job?.items[0] : undefined;
@@ -1094,6 +1121,17 @@ function Workspace({ user, client, onSignOut }: { user: WorkspaceUser; client: S
       setNotice(error instanceof Error ? error.message : 'Could not generate another filename. Your current output is unchanged.');
     }
   };
+  const handleSendToWebsite = async (itemIds: string[]) => {
+    if (!jobId || itemIds.length === 0) return;
+    setNotice('');
+    try {
+      const updated = await publishToWebsite.mutateAsync({ jobId, data: { itemIds } });
+      qc.setQueryData(getGetVectorizerJobQueryKey(jobId), updated);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'The designs could not be sent to the website. Please try again.');
+    }
+  };
+
   const handleDownload = async () => {
     setNotice('');
     if (localBatchId) {
@@ -1330,7 +1368,7 @@ function Workspace({ user, client, onSignOut }: { user: WorkspaceUser; client: S
                 activeView === 'analyzing' ? <ProcessingPanel job={job!} concurrency={parallelConcurrency} reconnecting={jobQuery.isError} /> :
                 activeView === 'review' ? <ReviewPanel job={job!} drafts={drafts} setDrafts={setDrafts} onProcess={handleProcess} saving={updateItems.isPending} processing={processJob.isPending} concurrency={parallelConcurrency} setConcurrency={setParallelConcurrency} /> :
                   activeView === 'processing' ? <ProcessingPanel job={job!} concurrency={parallelConcurrency} reconnecting={jobQuery.isError} /> :
-                    <ResultsPanel job={job!} onDownload={handleDownload} downloading={downloadQuery.isFetching} onFresh={handleFresh} />}
+                    <ResultsPanel job={job!} onDownload={handleDownload} downloading={downloadQuery.isFetching} onFresh={handleFresh} onSendToWebsite={(itemIds) => { void handleSendToWebsite(itemIds); }} sendingToWebsite={publishToWebsite.isPending} />}
           {notice && <div data-testid="status-workspace-error" className="mt-6 flex items-center justify-between gap-3 rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-xs text-destructive"><span className="flex items-center gap-2"><CircleAlert size={15} />{notice}</span><button data-testid="button-dismiss-error" onClick={() => setNotice('')}><X size={15} /></button></div>}
           {job?.error && <div data-testid="status-job-error" className="mt-6 rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-xs text-destructive"><span className="flex items-center gap-2 font-bold"><CircleAlert size={15} /> Batch processing error</span><p className="mt-1 pl-5 opacity-80">{job.error}</p></div>}
         </main>
