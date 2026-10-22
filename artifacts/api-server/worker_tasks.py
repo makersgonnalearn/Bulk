@@ -34,13 +34,20 @@ def remove_background(data: bytes) -> bytes:
 def harden_alpha(data: bytes) -> bytes:
     # Background removal leaves dark artwork slightly translucent, which vectorize
     # would otherwise drop as a drop shadow. Cut files only need solid or clear.
+    # Resize to vectorize's trace size first: resizing after hardening would soften
+    # the edges again and the shadow rule would bite notches out of them.
     import numpy as np
     from PIL import Image
+    from vectorize import MIN_UPSCALE_PX
 
     img = Image.open(io.BytesIO(data))
     if img.mode not in ("RGBA", "LA", "P"):
         return data
-    pixels = np.array(img.convert("RGBA"))
+    img = img.convert("RGBA")
+    scale = MIN_UPSCALE_PX / max(img.size)
+    if scale > 1:
+        img = img.resize((round(img.width * scale), round(img.height * scale)), Image.LANCZOS)
+    pixels = np.array(img)
     pixels[:, :, 3] = np.where(pixels[:, :, 3] >= ALPHA_CUTOFF, 255, 0).astype(np.uint8)
     buf = io.BytesIO()
     Image.fromarray(pixels).save(buf, format="PNG")
