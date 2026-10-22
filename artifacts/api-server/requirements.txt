@@ -1,1 +1,2 @@
 rembg[cpu]==2.0.85
+vtracer==0.6.15

@@ -39,6 +39,7 @@ RUN uv python install 3.13 \
     && rm -rf "${UV_CACHE_DIR}"
 
 RUN mkdir -p /home/node/.u2net /tmp/vector-batch-studio/jobs \
+    && /opt/rembg-venv/bin/python -c "from rembg import new_session; new_session('isnet-general-use')" \
     && chown -R node:node /home/node/.u2net /tmp/vector-batch-studio
 
 USER node

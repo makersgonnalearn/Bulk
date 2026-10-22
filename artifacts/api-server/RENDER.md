@@ -1,57 +1,52 @@
-# Deploying the existing Render service
+# Deploying on Render
 
-The API server can serve the built Vector Batch Studio UI from the same origin.
-In the existing Render web service, use the repository root as the service root
-and set:
+The live service runs from the repository's `Dockerfile`. Render builds the
+image, which includes the web app, the API, the Python worker, and the
+background-removal model, and serves everything from one origin.
 
-**Build command**
+## Service settings
 
-```sh
-pnpm install --frozen-lockfile && python3 -m pip install --user --break-system-packages -r artifacts/api-server/requirements.txt && PORT=5173 BASE_PATH=/ pnpm --filter @workspace/vector-workbench run build && pnpm --filter @workspace/api-server run build
-```
+- **Language:** Docker. Leave Root Directory blank.
+- **Branch:** `main`
+- **Health Check Path:** `/api/healthz`
+- **Instance:** 4 GB of memory is enough for the default limits below.
+- Run a single instance. Batches are held in memory, so autoscaling across
+  instances would split them.
 
-**Start command**
+## Environment variables
 
-```sh
-pnpm --filter @workspace/api-server run start
-```
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `SUPABASE_URL` | Yes | Project URL only, with no trailing path |
+| `SUPABASE_ANON_KEY` | Yes | The public anon/publishable key, never service_role |
+| `OPENAI_API_KEY` | Yes | Used for filenames and the SVG yes/no check |
+| `MAX_ACTIVE_ITEMS` | No | Images processed at once across all users. Default `1` |
+| `REMBG_MAX_PARALLEL_REMOVALS` | No | Background removals at once inside the worker. Default `1` |
+| `REMBG_DECONTAMINATE` | No | `true` turns on edge color cleanup. Default off: it adds about 1 GB per image and must stay at one removal at a time |
 
-For a VM deployment, copy the repository-root `.env.example` to `.env` and fill
-in the values there. The API loads `.env` before starting, whether launched from
-the repository root or the API package directory. Existing process/VM
-environment variables take precedence. Keep `.env` private; it is ignored by
-Git. Node.js 20.12 or later is required for the built-in env-file loader.
+Render supplies `PORT`. The Dockerfile sets `NODE_ENV`, `PYTHON_EXECUTABLE`,
+and the model path. Never set `DEV_SKIP_LOGIN` or `DEV_LOGIN_EMAIL` here.
 
-Configure these environment variables in Render:
+## Supabase
 
-- `SUPABASE_URL`
-- `SUPABASE_ANON_KEY` (or `SUPABASE_PUBLISHABLE_KEY`)
-- `OPENAI_API_KEY`
-- `PYTHON_EXECUTABLE=python3`
-- `PORT` is supplied by Render.
+Disable public sign-ups and invite team members from **Authentication → Users**.
+Under **Authentication → URL Configuration**, set **Site URL** to the Render
+URL and add `https://<service>.onrender.com/**` to **Redirect URLs**.
 
-Set the service health-check path to `/api/healthz`.
-Do not set `DEV_SKIP_LOGIN` or `DEV_LOGIN_EMAIL` on Render or any production
-deployment. The test login is intended only for a private development preview.
+## How processing works
 
-The Supabase project should have public sign-ups disabled; invite approved team
-members through Supabase. The browser receives only the public anon/publishable
-key. Never set a service-role key for this application.
+- The Node API handles uploads, OpenAI calls, and batch state.
+- A Python worker (`rembg-worker.py`) runs background removal, SVG tracing
+  (`vectorize.py`, vtracer), and the color check that decides whether an image
+  suits an SVG. If the worker crashes, the API restarts it on the next request
+  and the site stays up.
+- Background removal peaks around 2.4 GB for a 2400 px image and SVG tracing
+  around 0.9 GB, so the defaults run one image at a time.
+- SVGs are traced at 2500 px on the long side.
+- Images with more than 80 color groups (watercolors, photos) are not
+  pre-selected for SVG. People can still tick them on the review screen.
 
-For invite and password-reset emails, open **Authentication → URL Configuration**
-in the Supabase Dashboard. Set **Site URL** to the VM app's public HTTPS URL and
-add that exact app URL to **Redirect URLs**. Dashboard invitations use the Site
-URL by default; password-reset requests return to the current app URL. Do not use
-`localhost` as the production Site URL.
+## Restarts
 
-The background-removal worker uses rembg's `isnet-general-use` model by default.
-On the first background-removal request, rembg downloads and loads the model, so
-that request can take longer. Set `REMBG_MODEL=u2net` to use the previous model.
-IS-Net uses more memory than U²-Net; use that fallback on memory-constrained
-instances.
-CPU mask inference is limited to two concurrent requests by default; set
-`REMBG_MAX_PARALLEL_REMOVALS` to a value from 1 to 8 to change that limit.
-
-Batch metadata is held in process memory and files stay on the instance's
-temporary disk for up to two hours. Run a single web-service instance; a restart
-or deploy intentionally clears any in-progress or uncollected batches.
+A deploy or restart clears batches that are in progress. People's originals
+stay saved in their browser, and the app offers to re-upload them.

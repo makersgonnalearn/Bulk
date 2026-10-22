@@ -110,8 +110,10 @@ Open [http://localhost:8080](http://localhost:8080). The API loads the root
 
 ## Runtime and data notes
 
-- The background-removal model downloads the first time that feature is used.
-  That initial request can take longer; the Compose volume preserves the model.
+- The Docker image includes the background-removal model. When running from
+  source, the model downloads the first time that feature is used.
+- SVG tracing and background removal run in the Python worker. At most
+  `MAX_ACTIVE_ITEMS` images (default 1) process at once across all users.
 - Active API jobs and generated files are held in process memory and temporary
   storage. Restarting or replacing the container clears active jobs and results.
 - User-side saved batches are stored in the browser, not in the container.

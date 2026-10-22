@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import {
   Router,
   type IRouter,
@@ -36,6 +38,7 @@ import {
 import {
   analyzeSourceImage,
   encodeImageAsPng,
+  isComplexImage,
   removeImageBackground,
   traceTransparentPngToSvg,
 } from "../lib/image-processing";
@@ -50,7 +53,27 @@ const maxFiles = 50;
 const maxZipEntries = 2_000;
 const maxZipUncompressedBytes = 100 * 1024 * 1024;
 const maxBatchOutputBytes = 100 * 1024 * 1024;
+const ANALYSIS_CONCURRENCY = 4;
+const maxActiveItems = Math.max(1, Math.floor(Number(process.env.MAX_ACTIVE_ITEMS)) || 1);
 const nameRegenerationLocks = new Set<string>();
+
+// One server-wide limit across every user's batches keeps memory predictable.
+let activeItems = 0;
+const itemSlotWaiters: Array<() => void> = [];
+
+async function acquireItemSlot(): Promise<void> {
+  if (activeItems < maxActiveItems) {
+    activeItems += 1;
+    return;
+  }
+  await new Promise<void>((resolveSlot) => itemSlotWaiters.push(resolveSlot));
+}
+
+function releaseItemSlot(): void {
+  const next = itemSlotWaiters.shift();
+  if (next) next();
+  else activeItems -= 1;
+}
 
 class UploadInputError extends Error {}
 
@@ -244,7 +267,7 @@ async function expandZip(buffer: Buffer): Promise<StoredImageInput[]> {
       declaredUncompressedBytes += declaredSize;
       if (declaredUncompressedBytes > maxZipUncompressedBytes) {
         throw new UploadInputError(
-          "The ZIP expands beyond the 150 MB uncompressed batch limit.",
+          "The ZIP expands beyond the 100 MB uncompressed batch limit.",
         );
       }
     }
@@ -351,45 +374,90 @@ function addItemWarning(item: StoredVectorizerJob["items"][number], warning: str
   item.error = item.error ? `${item.error} ${warning}` : warning;
 }
 
+type ItemAnalysis = { name: string; includeSvg: boolean; error: string | null };
+
+async function analyzeItem(
+  job: StoredVectorizerJob,
+  item: StoredVectorizerJob["items"][number],
+  index: number,
+): Promise<ItemAnalysis> {
+  const fallback = fallbackName(item.originalName, index);
+  if (!job.options.seoNaming && !job.options.svgOutput) {
+    return { name: fallback, includeSvg: false, error: null };
+  }
+
+  const source = await readFile(item.sourcePath);
+  let complex: boolean | null = null;
+  if (job.options.svgOutput) {
+    try {
+      complex = await isComplexImage(source);
+    } catch (error) {
+      logger.warn({ err: error, jobId: job.id, itemId: item.id }, "Image complexity check failed");
+    }
+  }
+
+  try {
+    const analysis = await analyzeSourceImage(source, item.originalName);
+    return {
+      name: job.options.seoNaming ? analysis.suggestedName : fallback,
+      includeSvg: job.options.svgOutput && analysis.includeSvg && complex !== true,
+      error: null,
+    };
+  } catch (error) {
+    logger.warn(
+      { err: error, jobId: job.id, itemId: item.id },
+      "Image analysis failed; keeping the item available for manual review",
+    );
+    return {
+      name: fallback,
+      includeSvg: job.options.svgOutput && complex === false,
+      error: job.options.seoNaming
+        ? "AI analysis was unavailable. Review this filename and the SVG selection."
+        : "SVG suitability analysis was unavailable. Review the SVG selection.",
+    };
+  }
+}
+
 async function analyzeJob(job: StoredVectorizerJob): Promise<void> {
   const usedNames = new Set<string>();
-  try {
-    for (const [index, item] of job.items.entries()) {
-      if (job.cancelled) return;
-      if (!job.options.seoNaming && !job.options.svgOutput) {
-        item.suggestedName = uniqueName(fallbackName(item.originalName, index), usedNames);
-        item.suggestedNameHistory = [item.suggestedName];
-        item.includeSvg = false;
-        item.status = "ready";
-        job.lastAccessedAt = Date.now();
-        continue;
-      }
-      try {
-        const source = await readFile(item.sourcePath);
-        const analysis = await analyzeSourceImage(source, item.originalName);
-        item.suggestedName = uniqueName(
-          job.options.seoNaming
-            ? analysis.suggestedName
-            : fallbackName(item.originalName, index),
-          usedNames,
-        );
-        item.includeSvg = job.options.svgOutput && analysis.includeSvg;
-      } catch (error) {
-        const fallback = fallbackName(item.originalName, index);
-        item.suggestedName = uniqueName(fallback, usedNames);
-        item.includeSvg = job.options.svgOutput;
-        item.error = job.options.seoNaming
-          ? "AI analysis was unavailable. Review this filename; SVG output will still be attempted if enabled."
-          : "SVG suitability analysis was unavailable. SVG output will still be attempted.";
-        logger.warn(
-          { err: error, jobId: job.id, itemId: item.id },
-          "Image analysis failed; keeping the item available for manual review",
-        );
-      }
+  const results: Array<ItemAnalysis | undefined> = [];
+  let nextToAssign = 0;
+  let nextToAnalyze = 0;
+
+  // Names are assigned in upload order so duplicate suffixes stay stable.
+  const assignFinishedInOrder = () => {
+    while (results[nextToAssign]) {
+      const item = job.items[nextToAssign];
+      const result = results[nextToAssign]!;
+      item.suggestedName = uniqueName(result.name, usedNames);
       item.suggestedNameHistory = item.suggestedName ? [item.suggestedName] : [];
+      item.includeSvg = result.includeSvg;
+      if (result.error) item.error = result.error;
       item.status = "ready";
       job.lastAccessedAt = Date.now();
+      nextToAssign += 1;
     }
+  };
+
+  try {
+    await Promise.all(
+      Array.from({ length: Math.min(ANALYSIS_CONCURRENCY, job.items.length) }, async () => {
+        while (!job.cancelled) {
+          const index = nextToAnalyze++;
+          const item = job.items[index];
+          if (!item) return;
+          results[index] = await analyzeItem(job, item, index).catch((error: unknown) => {
+            logger.warn({ err: error, jobId: job.id, itemId: item.id }, "Image analysis failed");
+            return {
+              name: fallbackName(item.originalName, index),
+              includeSvg: false,
+              error: "This image could not be analyzed. Review its filename and SVG selection.",
+            };
+          });
+          assignFinishedInOrder();
+        }
+      }),
+    );
 
     if (!job.cancelled) {
       job.status = "ready";
@@ -502,13 +570,18 @@ async function processJob(
   };
 
   let nextItemIndex = 0;
-  const workerCount = Math.min(concurrency, job.items.length);
+  const workerCount = Math.min(concurrency, maxActiveItems, job.items.length);
   await Promise.all(
     Array.from({ length: workerCount }, async () => {
       while (!job.cancelled) {
         const item = job.items[nextItemIndex++];
         if (!item) return;
-        await processItem(item);
+        await acquireItemSlot();
+        try {
+          await processItem(item);
+        } finally {
+          releaseItemSlot();
+        }
       }
     }),
   );
@@ -890,14 +963,14 @@ router.get("/vectorizer/jobs/:jobId/download", async (req, res): Promise<void> =
       if (item.pngReady && item.pngPath) {
         archive.file(
           outputArchivePath(job, item, "png"),
-          await readFile(item.pngPath),
+          createReadStream(item.pngPath),
           { compression: "STORE" },
         );
       }
       if (item.includeSvg && item.svgReady && item.svgPath) {
         archive.file(
           outputArchivePath(job, item, "svg"),
-          await readFile(item.svgPath),
+          createReadStream(item.svgPath),
           { compression: "DEFLATE", compressionOptions: { level: 6 } },
         );
       }
@@ -908,16 +981,17 @@ router.get("/vectorizer/jobs/:jobId/download", async (req, res): Promise<void> =
       return;
     }
 
-    const output = await archive.generateAsync({
-      type: "nodebuffer",
-    });
     res
       .status(200)
       .type("application/zip")
-      .attachment("vector-batch-assets.zip")
-      .send(output);
+      .attachment("vector-batch-assets.zip");
+    await pipeline(archive.generateNodeStream({ streamFiles: true }), res);
   } catch (error) {
     req.log.error({ err: error, jobId: job.id }, "Could not build batch ZIP");
+    if (res.headersSent) {
+      res.destroy();
+      return;
+    }
     res.status(500).json({ error: "The ZIP could not be prepared. Please try again." });
   }
 });

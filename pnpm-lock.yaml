@@ -192,9 +192,6 @@ importers:
       express:
         specifier: ^5.2.1
         version: 5.2.1
-      imagetracerjs:
-        specifier: ^1.2.6
-        version: 1.2.6
       jszip:
         specifier: ^3.10.2
         version: 3.10.2
@@ -2510,9 +2507,6 @@ packages:
   iconv-lite@0.7.3:
     resolution: {integrity: sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ==}
     engines: {node: '>=0.10.0'}
-
-  imagetracerjs@1.2.6:
-    resolution: {integrity: sha512-LKJlnKmXFzDdh6IZtXTyBxXcCLTAkwgKYS+NMiPXiXVnlTLjQC8fq7U89laUSgHtypJB3TdMMDK4ecG5NI/Cgw==}
 
   immediate@3.0.6:
     resolution: {integrity: sha512-XXOFtyqDjNDAQxVfYxuF7g9Il/IbWmmlQg2MYKOH8ExIT1qg6xc4zyS3HaEEATgs1btfzxq15ciUiY7gjSXRGQ==}
@@ -5280,8 +5274,6 @@ snapshots:
   iconv-lite@0.7.3:
     dependencies:
       safer-buffer: 2.1.2
-
-  imagetracerjs@1.2.6: {}
 
   immediate@3.0.6: {}
 

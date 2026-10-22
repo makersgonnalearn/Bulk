@@ -76,6 +76,10 @@ import {
 
 const queryClient = new QueryClient();
 
+function isMissingBatch(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { status?: unknown }).status === 404;
+}
+
 type DraftItem = Pick<VectorizerJobItem, 'id' | 'originalName' | 'suggestedName' | 'includeSvg' | 'status' | 'error' | 'pngReady' | 'svgReady'>;
 type ImageSourceSummary = { png: number; jpeg: number };
 const defaultBatchOptions: BatchProcessingOptions = {
@@ -631,7 +635,7 @@ function ReviewPanel({ job, drafts, setDrafts, onProcess, saving, processing, co
               onChange={(event) => setConcurrency(Number(event.target.value))}
               className="h-10 rounded-lg border border-input bg-background px-3 text-xs font-bold"
             >
-              {Array.from({ length: 8 }, (_, index) => index + 1).map((value) => (
+              {Array.from({ length: 1 }, (_, index) => index + 1).map((value) => (
                 <option key={value} value={value}>{value}</option>
               ))}
             </select>
@@ -643,7 +647,7 @@ function ReviewPanel({ job, drafts, setDrafts, onProcess, saving, processing, co
   );
 }
 
-function ProcessingPanel({ job, concurrency }: { job: VectorizerJob; concurrency: number }) {
+function ProcessingPanel({ job, concurrency, reconnecting }: { job: VectorizerJob; concurrency: number; reconnecting: boolean }) {
   const analyzing = job.status === 'analyzing';
   const svgEstimateCount = analyzing
     ? job.options.svgOutput ? job.totalFiles : 0
@@ -670,7 +674,7 @@ function ProcessingPanel({ job, concurrency }: { job: VectorizerJob; concurrency
       <div className="mx-auto mt-10 max-w-2xl rounded-2xl border border-card-border bg-card p-5 text-left shadow-sm">
         <div className="mb-3 flex items-center justify-between text-xs"><span className="font-bold text-foreground">{finishedFiles} of {job.totalFiles} assets {analyzing ? 'analyzed' : 'processed'}</span><span className="mono text-primary">{progress}%</span></div>
         <div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${Math.max(4, progress)}%` }} /></div>
-         <div className="mt-4 flex justify-between text-[10px] text-muted-foreground"><span className="flex items-center gap-1.5"><Loader2 size={11} className="animate-spin" /> {analyzing ? 'Checking each image' : 'Working through your batch'}</span><span>Auto-refreshing</span></div>
+         <div className="mt-4 flex justify-between text-[10px] text-muted-foreground"><span className="flex items-center gap-1.5"><Loader2 size={11} className="animate-spin" /> {analyzing ? 'Checking each image' : 'Working through your batch'}</span><span>{reconnecting ? 'Reconnecting…' : 'Auto-refreshing'}</span></div>
         <div className="mt-4 max-h-72 divide-y divide-border overflow-y-auto rounded-lg border border-border">
           {job.items.map((item) => (
             <div key={item.id} data-testid={`processing-row-${item.id}`} className="flex items-center justify-between gap-3 px-3 py-2.5">
@@ -727,6 +731,7 @@ function Workspace({ user, client, onSignOut }: { user: WorkspaceUser; client: S
   const [drafts, setDrafts] = useState<DraftItem[]>([]);
   const [notice, setNotice] = useState('');
   const initialized = useRef<string | null>(null);
+  const draftsSourceStatus = useRef<string | null>(null);
   const lastSavedJobSignature = useRef('');
   const autoArchivedJobId = useRef<string | null>(null);
   const quickProcessStartedJobId = useRef<string | null>(null);
@@ -735,7 +740,7 @@ function Workspace({ user, client, onSignOut }: { user: WorkspaceUser; client: S
   const processJob = useProcessVectorizerJob();
   const deleteJob = useDeleteVectorizerJob();
   const regenerateQuickName = useRegenerateVectorizerJobItemName();
-  const jobQuery = useGetVectorizerJob(jobId || '', { query: { enabled: Boolean(jobId), queryKey: getGetVectorizerJobQueryKey(jobId || ''), refetchInterval: (query) => { if (query.state.error) return false; const state = query.state.data?.status; return !state || state === 'analyzing' || state === 'processing' ? 1800 : false; }, refetchIntervalInBackground: true, refetchOnMount: 'always' } });
+  const jobQuery = useGetVectorizerJob(jobId || '', { query: { enabled: Boolean(jobId), queryKey: getGetVectorizerJobQueryKey(jobId || ''), retry: (failureCount, error) => !isMissingBatch(error) && failureCount < 3, refetchInterval: (query) => { if (isMissingBatch(query.state.error)) return false; const state = query.state.data?.status; if (query.state.error) return 5000; return !state || state === 'analyzing' || state === 'processing' ? 1800 : false; }, refetchIntervalInBackground: true, refetchOnMount: 'always' } });
   const downloadQuery = useDownloadVectorizerJob(jobId || '', { request: { responseType: 'blob' }, query: { enabled: false, queryKey: getDownloadVectorizerJobQueryKey(jobId || '') } });
   const job = jobQuery.data;
   const quickItem = workflowMode === 'quick' ? job?.items[0] : undefined;
@@ -869,10 +874,13 @@ function Workspace({ user, client, onSignOut }: { user: WorkspaceUser; client: S
     }
   }, [workflowMode, job?.id]);
   useEffect(() => {
-    if (job && initialized.current !== job.id) {
+    if (!job) return;
+    // Copy server items until review starts, including the update that makes the batch ready.
+    const firstLoad = initialized.current !== job.id;
+    const justBecameReady = job.status === 'ready' && draftsSourceStatus.current !== 'ready';
+    draftsSourceStatus.current = job.status;
+    if (firstLoad || justBecameReady || job.status !== 'ready') {
       initialized.current = job.id;
-      setDrafts(job.items.map((item) => ({ ...item })));
-    } else if (job && job.status !== 'ready') {
       setDrafts(job.items.map((item) => ({ ...item })));
     }
   }, [job]);
@@ -1238,13 +1246,14 @@ function Workspace({ user, client, onSignOut }: { user: WorkspaceUser; client: S
 
   const activeView = useMemo(() => {
     if (!jobId) return 'upload';
+    if (isMissingBatch(jobQuery.error)) return 'expired';
     if (!job) return jobQuery.isError ? 'expired' : 'loading';
     if (job.status === 'analyzing') return 'analyzing';
     if (job.status === 'ready') return 'review';
     if (job.status === 'processing') return 'processing';
     if (job.status === 'completed' || job.status === 'failed') return 'results';
     return 'upload';
-  }, [jobId, job, jobQuery.isError]);
+  }, [jobId, job, jobQuery.isError, jobQuery.error]);
 
   return (
     <div className="flex min-h-[100dvh] bg-background">
@@ -1318,9 +1327,9 @@ function Workspace({ user, client, onSignOut }: { user: WorkspaceUser; client: S
                 />}
               </> :
                 workflowMode === 'quick' ? quickPanel :
-                activeView === 'analyzing' ? <ProcessingPanel job={job!} concurrency={parallelConcurrency} /> :
+                activeView === 'analyzing' ? <ProcessingPanel job={job!} concurrency={parallelConcurrency} reconnecting={jobQuery.isError} /> :
                 activeView === 'review' ? <ReviewPanel job={job!} drafts={drafts} setDrafts={setDrafts} onProcess={handleProcess} saving={updateItems.isPending} processing={processJob.isPending} concurrency={parallelConcurrency} setConcurrency={setParallelConcurrency} /> :
-                  activeView === 'processing' ? <ProcessingPanel job={job!} concurrency={parallelConcurrency} /> :
+                  activeView === 'processing' ? <ProcessingPanel job={job!} concurrency={parallelConcurrency} reconnecting={jobQuery.isError} /> :
                     <ResultsPanel job={job!} onDownload={handleDownload} downloading={downloadQuery.isFetching} onFresh={handleFresh} />}
           {notice && <div data-testid="status-workspace-error" className="mt-6 flex items-center justify-between gap-3 rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-xs text-destructive"><span className="flex items-center gap-2"><CircleAlert size={15} />{notice}</span><button data-testid="button-dismiss-error" onClick={() => setNotice('')}><X size={15} /></button></div>}
           {job?.error && <div data-testid="status-job-error" className="mt-6 rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-xs text-destructive"><span className="flex items-center gap-2 font-bold"><CircleAlert size={15} /> Batch processing error</span><p className="mt-1 pl-5 opacity-80">{job.error}</p></div>}
