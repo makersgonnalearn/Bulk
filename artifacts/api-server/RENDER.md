@@ -42,7 +42,15 @@ URL and add `https://<service>.onrender.com/**` to **Redirect URLs**.
   and the site stays up.
 - Background removal peaks around 2.4 GB for a 2400 px image and SVG tracing
   around 0.9 GB, so the defaults run one image at a time.
-- SVGs are traced at 2500 px on the long side.
+- SVGs are traced at 2500 px on the long side. Before tracing, every pixel is
+  made fully solid or fully clear (background removal leaves dark artwork
+  slightly translucent, which the tracer would drop), and specks under 16 px
+  are filtered out so pieces stay big enough to cut and weed.
+- Finished SVGs are sized 10 inches on the long side so Cricut Design Space
+  imports them at a usable size, with coordinates rounded to 2 decimals.
+- A trace with more than 40,000 path segments is treated as a runaway and
+  retried once. If the retry also fails, that image comes back PNG-only.
+  These settings live at the top of `worker_tasks.py`.
 - Images with more than 80 color groups (watercolors, photos) are not
   pre-selected for SVG. People can still tick them on the review screen.
 
