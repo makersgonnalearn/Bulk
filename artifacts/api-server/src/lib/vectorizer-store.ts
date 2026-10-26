@@ -40,6 +40,7 @@ export type StoredVectorizerItem = {
   wpPostId: number | null;
   wpEditUrl: string | null;
   wpError: string | null;
+  wpClaimedAt: number | null;
 };
 
 export type VectorizerProcessingOptions = {
@@ -113,6 +114,7 @@ export async function createStoredVectorizerJob(
         wpPostId: null,
         wpEditUrl: null,
         wpError: null,
+        wpClaimedAt: null,
       });
     }
   } catch (error) {
@@ -153,6 +155,19 @@ export function listOwnedVectorizerJobs(ownerId: string): StoredVectorizerJob[] 
   return [...jobs.values()].filter(
     (job) => job.ownerId === ownerId && !job.cancelled,
   );
+}
+
+// For the website's pull requests, which act for the whole team rather than
+// one signed-in owner.
+export function listActiveVectorizerJobs(): StoredVectorizerJob[] {
+  return [...jobs.values()]
+    .filter((job) => !job.cancelled)
+    .sort((a, b) => a.createdAt - b.createdAt);
+}
+
+export function getActiveVectorizerJob(jobId: string): StoredVectorizerJob | null {
+  const job = jobs.get(jobId);
+  return job && !job.cancelled ? job : null;
 }
 
 export async function deleteStoredVectorizerJob(jobId: string): Promise<void> {

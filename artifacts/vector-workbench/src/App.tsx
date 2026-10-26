@@ -701,7 +701,7 @@ function canSendToWebsite(item: VectorizerJobItem): boolean {
 }
 
 function WebsiteDraftStatus({ item }: { item: VectorizerJobItem }) {
-  if (item.wpStatus === 'queued' || item.wpStatus === 'sending') return <span data-testid={`status-website-${item.id}`} className="inline-flex items-center gap-1.5 rounded-full bg-accent/20 px-2.5 py-1 text-[10px] font-bold text-accent-foreground"><Loader2 size={11} className="animate-spin" />{item.wpStatus === 'queued' ? 'Queued' : 'Sending'}</span>;
+  if (item.wpStatus === 'queued' || item.wpStatus === 'sending') return <span data-testid={`status-website-${item.id}`} className="inline-flex items-center gap-1.5 rounded-full bg-accent/20 px-2.5 py-1 text-[10px] font-bold text-accent-foreground"><Loader2 size={11} className="animate-spin" />{item.wpStatus === 'queued' ? 'Waiting for website' : 'Building draft'}</span>;
   if (item.wpStatus === 'sent' && item.wpEditUrl) return <a data-testid={`link-website-draft-${item.id}`} href={item.wpEditUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary transition hover:bg-primary/20">Draft created · Open in WordPress <ExternalLink size={11} /></a>;
   if (item.wpStatus === 'failed') return <span data-testid={`status-website-${item.id}`} className="inline-flex items-center gap-1.5 rounded-full bg-destructive/10 px-2.5 py-1 text-[10px] font-bold text-destructive"><CircleAlert size={11} />Not sent</span>;
   return null;
@@ -711,7 +711,7 @@ function ResultsPanel({ job, onDownload, downloading, onFresh, onSendToWebsite, 
   const completed = job.items.filter((item) => item.status === 'completed' || item.status === 'png-only');
   const failed = job.items.filter((item) => item.status === 'failed');
   const websiteEnabled = job.websiteDraftsEnabled && job.status === 'completed';
-  const [websiteSelection, setWebsiteSelection] = useState<Set<string>>(() => new Set(job.items.filter((item) => item.pngReady && item.wpStatus === 'none').map((item) => item.id)));
+  const [websiteSelection, setWebsiteSelection] = useState<Set<string>>(() => new Set(job.items.filter(canSendToWebsite).map((item) => item.id)));
   const selectedForWebsite = job.items.filter((item) => canSendToWebsite(item) && websiteSelection.has(item.id));
   const sentCount = job.items.filter((item) => item.wpStatus === 'sent').length;
   const websiteBusy = sendingToWebsite || job.items.some((item) => item.wpStatus === 'queued' || item.wpStatus === 'sending');

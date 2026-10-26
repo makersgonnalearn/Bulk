@@ -707,7 +707,7 @@ export const getPublishVectorizerJobToWebsiteUrl = (jobId: string,) => {
 }
 
 /**
- * Queues the selected items and sends them one at a time. Poll the job for each item's wpStatus. Items already sent or in progress are skipped.
+ * Queues the selected items. The website picks them up about once a minute through the /website-drafts routes (it cannot accept inbound calls from this server). Poll the job for each item's wpStatus. Items already sent or in progress are skipped.
  * @summary Send finished designs to the MGL website as draft cut files
  */
 export const publishVectorizerJobToWebsite = async (jobId: string,
