@@ -707,6 +707,53 @@ function WebsiteDraftStatus({ item }: { item: VectorizerJobItem }) {
   return null;
 }
 
+// The website picks designs up about once a minute and builds roughly three a minute after that.
+function estimateWebsiteMinutes(waiting: number): number {
+  return 1 + Math.ceil(waiting / 3);
+}
+
+function WebsiteSendPanel({ job, queuing, onBack, onRetry, onFresh }: { job: VectorizerJob; queuing: boolean; onBack: () => void; onRetry: (itemIds: string[]) => void; onFresh: () => void }) {
+  const items = job.items.filter((item) => item.wpStatus !== 'none');
+  const sent = items.filter((item) => item.wpStatus === 'sent');
+  const failed = items.filter((item) => item.wpStatus === 'failed');
+  const waiting = items.length - sent.length - failed.length;
+  const done = !queuing && items.length > 0 && waiting === 0;
+  const progress = items.length ? Math.round(((sent.length + failed.length) / items.length) * 100) : 0;
+  const minutes = estimateWebsiteMinutes(waiting);
+  return (
+    <div className="animate-rise-in mx-auto max-w-2xl py-10 text-center">
+      <div className={`relative mx-auto mb-7 flex size-24 items-center justify-center rounded-[28px] border border-primary/25 bg-primary/10 text-primary`}>{!done && <div className="absolute inset-2 rounded-[20px] border border-primary/20 progress-line" />}{done ? <CheckCircle2 size={34} strokeWidth={1.5} /> : <Globe size={34} strokeWidth={1.5} />}</div>
+      <p className="mono mb-3 text-[10px] uppercase tracking-[.22em] text-primary">{done ? '06 / drafts ready' : '06 / sending to website'}</p>
+      <h1 data-testid="text-website-heading" className="text-4xl font-extrabold tracking-[-.07em]">{!done ? <>Sending your designs<br /><span className="text-primary">to the website.</span></> : failed.length ? <>Some designs<br /><span className="text-primary">need another try.</span></> : <>Your drafts are<br /><span className="text-primary">ready in WordPress.</span></>}</h1>
+      <p className="mx-auto mt-4 max-w-md text-sm leading-6 text-muted-foreground">{done
+        ? `${sent.length} ${sent.length === 1 ? 'draft is' : 'drafts are'} waiting in WordPress for categories, details, and publishing.${failed.length ? ` ${failed.length} could not be created; the reason is listed below.` : ''}`
+        : 'The website checks for new designs about once a minute, then builds each draft with its download ZIP and preview images. This keeps going even if you close this tab.'}</p>
+      <div className="mx-auto mt-10 max-w-2xl rounded-2xl border border-card-border bg-card p-5 text-left shadow-sm">
+        <div className="mb-3 flex items-center justify-between text-xs"><span data-testid="text-website-progress" className="font-bold text-foreground">{sent.length + failed.length} of {items.length} finished</span><span className="mono text-primary">{progress}%</span></div>
+        <div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${Math.max(4, progress)}%` }} /></div>
+        <div className="mt-4 flex justify-between text-[10px] text-muted-foreground">{done ? <span className="flex items-center gap-1.5"><Check size={11} /> All done</span> : <><span className="flex items-center gap-1.5"><Loader2 size={11} className="animate-spin" /> {queuing ? 'Queuing your designs' : `About ${minutes} min left`}</span><span>Auto-refreshing</span></>}</div>
+        <div className="mt-4 max-h-72 divide-y divide-border overflow-y-auto rounded-lg border border-border">
+          {items.map((item) => (
+            <div key={item.id} data-testid={`website-row-${item.id}`} className="flex items-center justify-between gap-3 px-3 py-2.5">
+              <div className="min-w-0">
+                <p className="truncate text-[11px] font-semibold text-foreground">{item.suggestedName}</p>
+                <p className="truncate text-[10px] text-muted-foreground">{item.originalPath || item.originalName}</p>
+                {item.wpStatus === 'failed' && item.wpError && <p className="mt-1 text-[10px] text-destructive">{item.wpError}</p>}
+              </div>
+              <WebsiteDraftStatus item={item} />
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
+        {done && failed.length > 0 && <button data-testid="button-website-retry" onClick={() => onRetry(failed.map((item) => item.id))} className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-xs font-extrabold text-primary-foreground transition hover:opacity-90"><RefreshCw size={15} /> Try {failed.length} again</button>}
+        <button data-testid="button-website-back" onClick={onBack} className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-xs font-extrabold transition hover:bg-muted"><ArrowDownToLine size={15} /> Back to downloads</button>
+        {done && <button data-testid="button-website-new-batch" onClick={onFresh} className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-xs font-extrabold transition hover:bg-muted"><Plus size={15} /> Start a new batch</button>}
+      </div>
+    </div>
+  );
+}
+
 function ResultsPanel({ job, onDownload, downloading, onFresh, onSendToWebsite, sendingToWebsite }: { job: VectorizerJob; onDownload: () => void; downloading: boolean; onFresh: () => void; onSendToWebsite: (itemIds: string[]) => void; sendingToWebsite: boolean }) {
   const completed = job.items.filter((item) => item.status === 'completed' || item.status === 'png-only');
   const failed = job.items.filter((item) => item.status === 'failed');
@@ -720,12 +767,22 @@ function ResultsPanel({ job, onDownload, downloading, onFresh, onSendToWebsite, 
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
+  // Opens on Send, and again when someone comes back while designs are still on their way.
+  const [showWebsiteProgress, setShowWebsiteProgress] = useState(() => job.items.some((item) => item.wpStatus === 'queued' || item.wpStatus === 'sending'));
+  const sendToWebsite = (itemIds: string[]) => {
+    if (itemIds.length === 0) return;
+    setShowWebsiteProgress(true);
+    onSendToWebsite(itemIds);
+  };
+  if (showWebsiteProgress && (sendingToWebsite || job.items.some((item) => item.wpStatus !== 'none'))) {
+    return <WebsiteSendPanel job={job} queuing={sendingToWebsite} onBack={() => setShowWebsiteProgress(false)} onRetry={sendToWebsite} onFresh={onFresh} />;
+  }
   return (
     <div className="animate-rise-in">
       <div className="mb-8 flex flex-col justify-between gap-5 sm:flex-row sm:items-end"><div><p className="mono mb-3 text-[10px] uppercase tracking-[.22em] text-primary">05 / delivery ready</p><h1 className="text-4xl font-extrabold tracking-[-.07em]">The set is<br /><span className="text-primary">ready to move.</span></h1><p className="mt-4 text-sm text-muted-foreground">{completed.length} assets prepared{failed.length ? ` · ${failed.length} need attention` : ''}.</p></div><div className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary"><CheckCircle2 size={30} strokeWidth={1.6} /></div></div>
       <div className="rounded-2xl border border-card-border bg-card shadow-sm">
         <div className="flex flex-col justify-between gap-4 border-b border-border p-5 sm:flex-row sm:items-center sm:px-6"><div className="flex items-center gap-3"><div className="flex size-10 items-center justify-center rounded-xl bg-secondary text-primary"><FileArchive size={19} /></div><div><p className="text-sm font-extrabold">vector-batch-assets.zip</p><p className="mono mt-1 text-[10px] text-muted-foreground">{completed.length} assets · {job.options.backgroundRemoval ? 'transparent PNG' : 'PNG with background intact'}{job.options.svgOutput ? ' + selected SVG' : ''}</p></div></div><button data-testid="button-download-zip" onClick={onDownload} disabled={downloading || completed.length === 0} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-xs font-extrabold text-primary-foreground transition hover:opacity-90 disabled:opacity-60">{downloading ? <Loader2 size={15} className="animate-spin" /> : <ArrowDownToLine size={15} />}{downloading ? 'Preparing ZIP…' : 'Download ZIP'}</button></div>
-        {websiteEnabled && <div className="flex flex-col justify-between gap-4 border-b border-border bg-muted/40 p-5 sm:flex-row sm:items-center sm:px-6"><div className="flex items-center gap-3"><div className="flex size-10 items-center justify-center rounded-xl bg-secondary text-primary"><Globe size={19} /></div><div><p className="text-sm font-extrabold">MGL website</p><p className="mono mt-1 text-[10px] text-muted-foreground">Drafts only · the team adds details and publishes{sentCount ? ` · ${sentCount} sent` : ''}</p></div></div><button data-testid="button-send-to-website" onClick={() => onSendToWebsite(selectedForWebsite.map((item) => item.id))} disabled={sendingToWebsite || selectedForWebsite.length === 0} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-primary px-4 text-xs font-extrabold text-primary transition hover:bg-primary/10 disabled:opacity-60">{websiteBusy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}Send {selectedForWebsite.length || ''} to website as drafts</button></div>}
+        {websiteEnabled && <div className="flex flex-col justify-between gap-4 border-b border-border bg-muted/40 p-5 sm:flex-row sm:items-center sm:px-6"><div className="flex items-center gap-3"><div className="flex size-10 items-center justify-center rounded-xl bg-secondary text-primary"><Globe size={19} /></div><div><p className="text-sm font-extrabold">MGL website</p><p className="mono mt-1 text-[10px] text-muted-foreground">Drafts only · the team adds details and publishes{sentCount ? ` · ${sentCount} sent` : ''}</p></div></div><button data-testid="button-send-to-website" onClick={() => sendToWebsite(selectedForWebsite.map((item) => item.id))} disabled={sendingToWebsite || selectedForWebsite.length === 0} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-primary px-4 text-xs font-extrabold text-primary transition hover:bg-primary/10 disabled:opacity-60">{websiteBusy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}Send {selectedForWebsite.length || ''} to website as drafts</button></div>}
         <div className="max-h-[32rem] divide-y divide-border overflow-y-auto">
           {job.items.map((item) => <div key={item.id} data-testid={`result-row-${item.id}`} className="flex flex-col gap-2 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-6"><div className="flex min-w-0 items-center gap-3">{websiteEnabled && <input type="checkbox" data-testid={`checkbox-website-${item.id}`} aria-label={`Send ${item.suggestedName} to the website`} checked={canSendToWebsite(item) && websiteSelection.has(item.id)} disabled={!canSendToWebsite(item) || sendingToWebsite} onChange={() => toggleWebsiteItem(item.id)} className="size-4 shrink-0 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-40" />}<span className={`flex size-7 shrink-0 items-center justify-center rounded-md ${item.status === 'failed' ? 'bg-destructive/10 text-destructive' : 'bg-primary/10 text-primary'}`}>{item.status === 'failed' ? <CircleAlert size={14} /> : <Check size={14} />}</span><div className="min-w-0"><p className="truncate text-[10px] text-muted-foreground">{item.originalPath || item.originalName}</p><p className="truncate text-xs font-bold">{item.suggestedName}{item.pngReady ? '.png' : ''}{item.svgReady && item.includeSvg ? ' + .svg' : ''}</p>{item.error && <p className="mt-1 truncate text-[10px] text-destructive">{item.error}</p>}{item.wpStatus === 'failed' && item.wpError && <p data-testid={`text-website-error-${item.id}`} className="mt-1 text-[10px] text-destructive">{item.wpError}</p>}</div></div><div className="flex flex-wrap items-center gap-2 pl-10 sm:justify-end sm:pl-0">{item.status === 'failed' ? <StatusPill status="failed" /> : <>{item.pngReady && <span className="rounded bg-secondary px-2 py-1 mono text-[9px] text-secondary-foreground">PNG</span>}{item.svgReady && item.includeSvg && <span className="rounded bg-accent/20 px-2 py-1 mono text-[9px] text-accent-foreground">SVG</span>}<WebsiteDraftStatus item={item} /></>}</div></div>)}
         </div>
